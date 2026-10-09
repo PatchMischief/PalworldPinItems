@@ -1,0 +1,2 @@
+# Development checks only; the game mod requires no Python packages.
+lupa==2.8
