@@ -1,7 +1,11 @@
 local UEHelpers = require("UEHelpers")
 local Recipes = require("recipes")
 local UI = require("ui")
+local Inventory = require("inventory")
 local tracker = Recipes.new_tracker()
+local inventory_cache = Inventory.new()
+Inventory.subscribe(inventory_cache)
+local rendered = {}
 local widget, owner, hovered
 local cards, menu_view
 local hooks_ready = false
@@ -11,10 +15,32 @@ local last_error
 local asset = "/Game/Mods/PalworldPinItems/WBP_PinItems.WBP_PinItems_C"
 local tooltip_class = "WBP_InventoryEquipment_ItemInfo_C"
 local build_class = "WBP_IngameMenu_Construction_Icon_C"
+local ui_instances = {[build_class] = {}, [tooltip_class] = {}, WBP_MainMenu_C = {}}
+local seeded = false
+local gameplay = StaticFindObject("/Script/Engine.Default__GameplayStatics")
 
 local function valid(object)
     local kind = type(object)
     return (kind == "userdata" or kind == "table") and type(object.IsValid) == "function" and object:IsValid()
+end
+
+local function remember_widget(object)
+    local list = ui_instances[object:GetClass():GetFName():ToString()]
+    if not list or object:GetFName():ToString():match("^Default__") then return end
+    for _, existing in ipairs(list) do
+        if valid(existing) and existing:GetAddress() == object:GetAddress() then return end
+    end
+    list[#list + 1] = object
+end
+
+NotifyOnNewObject("/Script/UMG.UserWidget", remember_widget)
+
+local function widgets(class)
+    local list = ui_instances[class]
+    for index = #list, 1, -1 do
+        if not valid(list[index]) then table.remove(list, index) end
+    end
+    return list
 end
 
 local function get(object, property)
@@ -98,9 +124,10 @@ end
 
 local function current_recipe()
     local hud = owner:GetHUD()
+    if not hud:IsAnyOverlayUIActive() then return nil end
     -- The build menu stores soft references; read the hovered icon's actual recipe row.
     if hud:IsAnyOverlayUIActive() then
-        for _, icon in ipairs(FindAllOf(build_class) or {}) do
+        for _, icon in ipairs(widgets(build_class)) do
             local button = get(icon, "WBP_PalInvisibleButton")
             if valid(icon) and icon:IsVisible() and (icon:IsHovered() or (valid(button) and button:IsHovered())) then
                 local row = get(icon, "MyBuildObjectData")
@@ -117,7 +144,7 @@ local function current_recipe()
     local tooltip = get(hud, "HoverWidget")
     if not valid(tooltip) or not get(tooltip, "CachedDisplayInfo") then
         tooltip = nil
-        for _, candidate in ipairs(FindAllOf(tooltip_class) or {}) do
+        for _, candidate in ipairs(widgets(tooltip_class)) do
             if valid(candidate) and candidate:IsVisible() then tooltip = candidate; break end
         end
     end
@@ -144,23 +171,28 @@ end
 
 local function refresh()
     local has_pins = #tracker.pins > 0
-    widget:SetVisibility((hovered or has_pins) and 4 or 1) -- SelfHitTestInvisible / Collapsed.
-    widget.HoverName:SetText(FText(hovered and hovered.name or ""))
-    widget.HoverName:SetVisibility(hovered and 0 or 1)
-    widget.PinButton:SetVisibility(hovered and 0 or 1)
-    widget.PinLabel:SetText(FText(Recipes.is_pinned(tracker, hovered) and "Unpin this item  [F8]" or "Pin this item  [F8]"))
     local state = owner:GetPalPlayerState()
     local inventory = valid(state) and state:GetInventoryData() or nil
-    local counts = {}
-    local function owned_count(id)
-        if not valid(inventory) then return nil end
-        if counts[id] == nil then counts[id] = inventory:CountItemNum(FName(id)) end
-        return counts[id]
+    Inventory.bind(inventory_cache, inventory, os.clock(), has_pins)
+    local version = tracker.version .. ":" .. inventory_cache.version
+    local hover_key = hovered and hovered.key or ""
+    if rendered.version ~= version or rendered.hover ~= hover_key then
+        UI.visibility(widget, (hovered or has_pins) and 4 or 1) -- SelfHitTestInvisible / Collapsed.
+        UI.text(widget.HoverName, hovered and hovered.name or "")
+        UI.visibility(widget.HoverName, hovered and 0 or 1)
+        UI.visibility(widget.PinButton, hovered and 0 or 1)
+        UI.text(widget.PinLabel, Recipes.is_pinned(tracker, hovered) and "Unpin this item  [F8]" or "Pin this item  [F8]")
+        local function owned_count(id)
+            return Inventory.count(inventory_cache, id)
+        end
+        local models = Recipes.display(tracker, 1, item_name, owned_count)
+        UI.draw(cards, models, owner)
+        UI.text(widget.Heading, "Pinned items" .. (#tracker.pins > 5 and ("  (5/" .. #tracker.pins .. "; see Pinned tab)") or ""))
+        UI.visibility(widget.ClearButton, has_pins and 0 or 1)
+        rendered.version, rendered.hover = version, hover_key
     end
-    local models = Recipes.display(tracker, 1, item_name, owned_count)
-    UI.draw(cards, models, owner)
-    widget.Heading:SetText(FText("Pinned items" .. (#tracker.pins > 5 and ("  (5/" .. #tracker.pins .. "; see Pinned tab)") or "")))
-    UI.update_menu(menu_view, tracker, item_name, owned_count)
+    UI.update_menu(menu_view, tracker, item_name, function(id) return Inventory.count(inventory_cache, id) end,
+        widgets("WBP_MainMenu_C"), version)
     if not menu_hooks_ready then
         local native = "/Game/Pal/Blueprint/UI/UserInterface/MainMenu/WBP_MainMenu.WBP_MainMenu_C:SelectByMainMenuType"
         if valid(StaticFindObject(native)) then
@@ -168,7 +200,6 @@ local function refresh()
             menu_hooks_ready = true
         end
     end
-    widget.ClearButton:SetVisibility(has_pins and 0 or 1)
 end
 
 local function pin()
@@ -179,7 +210,7 @@ local function pin()
 end
 
 local function clear()
-    tracker.pins = {}
+    Recipes.clear(tracker)
     if valid(widget) then refresh() end
 end
 
@@ -189,6 +220,7 @@ local function ensure_widget(controller)
     if menu_view and valid(menu_view.widget) then menu_view.widget:RemoveFromParent() end
     if menu_view and valid(menu_view.tab) then menu_view.tab:RemoveFromParent() end
     owner = controller
+    rendered = {}
     local class = StaticFindObject(asset)
     if not valid(class) then
         -- Mod paks are mounted without adding their assets to the game's registry.
@@ -216,8 +248,8 @@ local function ensure_widget(controller)
     local library = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
     widget = library:Create(controller, class, controller)
     if not valid(widget) then error("Could not create pin UI") end
-    widget.RootCanvas:SetVisibility(4)
-    widget:SetVisibility(1)
+    UI.visibility(widget.RootCanvas, 4)
+    UI.visibility(widget, 1)
     widget:AddToViewport(100)
     cards = UI.cards(widget.PinnedList, controller)
     menu_view = UI.menu(controller)
@@ -226,27 +258,38 @@ local function ensure_widget(controller)
 end
 
 local function update()
-    local controller = UEHelpers.GetPlayerController()
+    local viewport = UEHelpers.GetGameViewportClient()
+    local controller = valid(viewport) and gameplay:GetPlayerController(viewport, 0) or nil
     if not valid(controller) then
         if valid(widget) then widget:RemoveFromParent() end
         if menu_view and valid(menu_view.widget) then menu_view.widget:RemoveFromParent() end
         if menu_view and valid(menu_view.tab) then menu_view.tab:RemoveFromParent() end
         widget, owner, hovered = nil, nil, nil
         cards, menu_view = nil, nil
+        rendered = {}
         return
+    end
+    if not seeded then
+        -- One bootstrap scan per class also supports loading the mod after UI already exists.
+        for class in pairs(ui_instances) do
+            for _, object in ipairs(FindAllOf(class) or {}) do remember_widget(object) end
+        end
+        seeded = true
     end
     -- Load and validate the collapsed widget before entering a save.
     ensure_widget(controller)
     if not valid(controller:GetHUD()) then
-        widget:SetVisibility(1); menu_view.widget:SetVisibility(1); menu_view.open = false; hovered = nil; return
+        UI.visibility(widget, 1); UI.visibility(menu_view.widget, 1); menu_view.open = false
+        hovered = nil; rendered = {}; return
     end
     -- Only show on the local in-game HUD; no visible UI on the title screen.
     local hud_name = controller:GetHUD():GetFullName()
     if not hud_name:find("PalHUD_InGame", 1, true) and not hud_name:find("PalHUDInGame", 1, true) then
-        widget:SetVisibility(1)
-        menu_view.widget:SetVisibility(1)
+        UI.visibility(widget, 1)
+        UI.visibility(menu_view.widget, 1)
         menu_view.open = false
         hovered = nil
+        rendered = {}
         return
     end
     if not widget.Panel:IsHovered() then
@@ -261,9 +304,13 @@ end
 
 RegisterKeyBind(Key.F8, function() ExecuteInGameThread(pin) end)
 RegisterKeyBind(Key.F8, {ModifierKey.SHIFT}, function() ExecuteInGameThread(clear) end)
+local update_pending = false
 LoopAsync(150, function()
+    if update_pending then return end
+    update_pending = true
     ExecuteInGameThread(function()
         local ok, message = xpcall(update, debug.traceback)
+        update_pending = false
         if not ok and message ~= last_error then
             print("[PalworldPinItems] " .. tostring(message))
             last_error = message

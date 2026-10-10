@@ -10,6 +10,8 @@ Implementation: UE4SS Lua plus five small UMG Widget Blueprints cooked with Unre
 
 ## Development status
 
+On 2026-10-10, the user confirmed the installed performance patch works well and reported no bugs so far. Inventory counts persist in a hash cache invalidated by local inventory update handlers; notifications coalesce into one refresh, with a ten-second recovery refresh (one second if no handlers are available). HUD and page cards redraw only when pins, counts, or the displayed page change. Automated checks and native startup also pass. See [PERFORMANCE.md](PERFORMANCE.md) for measurements and their limits. The confirmed version counts personal inventory only.
+
 The first live test confirmed workbench pinning, and exposed a failure in the B build menu. The corrected build reads hovered construction icons and displays live personal-inventory counts as needed/owned. The next live run crashed before those features could be checked; matching UE4SS symbols identify the abort in native `FText:ToString()`. Failed recipe lookups and building IDs without an item name could reach that conversion. The crash fix checks recipe lookup success and verifies static item data before requesting a localized label; buildings without a blueprint item use their building ID as a fallback. Regression tests reproduce the unsafe lookup before the fix and pass after it, alongside B-menu and changing-inventory checks. On 2026-10-10, the user confirmed the installed crash fix works without crashing: both the B menu and workbench pinning work, and needed/owned counts update correctly. Runtime logs also record building and crafting pin actions. Installed and packaged Lua match the tested source. This is a development build.
 
 ## Controls and installation

@@ -25,21 +25,23 @@ function Recipes.from_row(kind, id, row, name)
 end
 
 function Recipes.new_tracker()
-    return {pins = {}}
+    return {pins = {}, by_key = {}, version = 0}
 end
 
 function Recipes.is_pinned(tracker, recipe)
     if not recipe then return false end
-    for _, pin in ipairs(tracker.pins) do
-        if pin.key == recipe.key then return true end
-    end
-    return false
+    return tracker.by_key[recipe.key] ~= nil
 end
 
 function Recipes.toggle(tracker, recipe)
     if not recipe then return false end
-    for index, pin in ipairs(tracker.pins) do
-        if pin.key == recipe.key then table.remove(tracker.pins, index); return false end
+    if tracker.by_key[recipe.key] then
+        for index, pin in ipairs(tracker.pins) do
+            if pin.key == recipe.key then table.remove(tracker.pins, index); break end
+        end
+        tracker.by_key[recipe.key] = nil
+        tracker.version = tracker.version + 1
+        return false
     end
     -- Store a detached snapshot, never a live tooltip/recipe UObject.
     local pin = {key = recipe.key, name = recipe.name, kind = recipe.kind, icon_id = recipe.icon_id, icon_path = recipe.icon_path,
@@ -48,7 +50,14 @@ function Recipes.toggle(tracker, recipe)
         pin.materials[#pin.materials + 1] = {id = material.id, count = material.count}
     end
     tracker.pins[#tracker.pins + 1] = pin
+    tracker.by_key[recipe.key] = pin
+    tracker.version = tracker.version + 1
     return true
+end
+
+function Recipes.clear(tracker)
+    tracker.pins, tracker.by_key = {}, {}
+    tracker.version = tracker.version + 1
 end
 
 function Recipes.display(tracker, page, item_name, owned_count)

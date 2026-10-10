@@ -2,6 +2,28 @@ local Recipes = require("recipes")
 local UI = {}
 local folder = "/Game/Mods/PalworldPinItems/"
 local check_path = "/Game/Pal/Texture/UI/Main_Menu/T_prt_itemslot_select_check_0.T_prt_itemslot_select_check_0"
+local text_values, visibility_values, enabled_values = {}, {}, {}
+
+function UI.text(widget, value)
+    local address = widget:GetAddress()
+    if text_values[address] == value then return end
+    widget:SetText(FText(value))
+    text_values[address] = value
+end
+
+function UI.visibility(widget, value)
+    local address = widget:GetAddress()
+    if visibility_values[address] == value then return end
+    widget:SetVisibility(value)
+    visibility_values[address] = value
+end
+
+local function enabled(widget, value)
+    local address = widget:GetAddress()
+    if enabled_values[address] == value then return end
+    widget:SetIsEnabled(value)
+    enabled_values[address] = value
+end
 
 local function valid(object) return object and object:IsValid() end
 local function system() return StaticFindObject("/Script/Engine.Default__KismetSystemLibrary") end
@@ -18,6 +40,9 @@ function UI.class(name)
 end
 
 function UI.create(controller, name)
+    -- Property reads can return new Lua wrappers; native addresses identify widgets.
+    -- Reset on creation so destroyed widgets' reused addresses cannot suppress initial values.
+    text_values, visibility_values, enabled_values = {}, {}, {}
     local library = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
     return library:Create(controller, UI.class(name), controller)
 end
@@ -30,7 +55,7 @@ end
 local function set_icon(image, model, controller)
     if model.icon_path then
         local texture = load_texture(model.icon_path)
-        image:SetVisibility(valid(texture) and 3 or 2)
+        UI.visibility(image, valid(texture) and 3 or 2)
         if valid(texture) then image:SetBrushFromTexture(texture, false) end
         return
     end
@@ -50,7 +75,7 @@ local function set_icon(image, model, controller)
         if valid(data) then soft = data.IconTexture end
     end
     local available = soft and system():IsValidSoftObjectReference(soft)
-    image:SetVisibility(available and 3 or 2)
+    UI.visibility(image, available and 3 or 2)
     if available then image:SetBrushFromSoftTexture(soft, false) end
 end
 
@@ -65,7 +90,7 @@ function UI.cards(container, controller)
             local row = UI.create(controller, "WBP_PinMaterial")
             card.Materials:AddChildToVerticalBox(row)
             if valid(check) then row.Complete:SetBrushFromTexture(check, false) end
-            row:SetVisibility(1)
+            UI.visibility(row, 1)
             rows[material] = row
         end
         card:SetVisibility(1)
@@ -77,25 +102,25 @@ end
 function UI.draw(cards, models, controller)
     for index, card in ipairs(cards) do
         local model = models[index]
-        card.widget:SetVisibility(model and 4 or 1)
+        UI.visibility(card.widget, model and 4 or 1)
         if model then
-            card.widget.ItemName:SetText(FText(model.title))
+            UI.text(card.widget.ItemName, model.title)
             local key = (model.kind or "craft") .. ":" .. (model.icon_path or model.icon_id or "")
             if card.icon_key ~= key then set_icon(card.widget.ItemIcon, model, controller); card.icon_key = key end
             for material, row in ipairs(card.rows) do
                 local ingredient = model.materials[material]
-                row:SetVisibility((ingredient or (material == 1 and #model.materials == 0)) and 4 or 1)
+                UI.visibility(row, (ingredient or (material == 1 and #model.materials == 0)) and 4 or 1)
                 if ingredient then
-                    row.MaterialName:SetText(FText(ingredient.text))
-                    row.Complete:SetVisibility(ingredient.complete and 3 or 2)
+                    UI.text(row.MaterialName, ingredient.text)
+                    UI.visibility(row.Complete, ingredient.complete and 3 or 2)
                     if row.icon_id ~= ingredient.id then
                         set_icon(row.MaterialIcon, {icon_id = ingredient.id}, controller)
                         row.icon_id = ingredient.id
                     end
                 elseif material == 1 and #model.materials == 0 then
-                    row.MaterialName:SetText(FText("No materials required"))
-                    row.MaterialIcon:SetVisibility(2)
-                    row.Complete:SetVisibility(2)
+                    UI.text(row.MaterialName, "No materials required")
+                    UI.visibility(row.MaterialIcon, 2)
+                    UI.visibility(row.Complete, 2)
                     row.icon_id = nil
                 end
             end
@@ -106,34 +131,37 @@ end
 function UI.menu(controller)
     local view = {controller = controller, page = 1, open = false}
     view.widget = UI.create(controller, "WBP_PinPage")
-    view.widget:SetVisibility(1)
+    UI.visibility(view.widget, 1)
     view.widget:AddToViewport(200)
     view.cards = UI.cards(view.widget.PinnedList, controller)
     return view
 end
 
-function UI.update_menu(view, tracker, item_name, owned_count)
+function UI.update_menu(view, tracker, item_name, owned_count, menus, version)
     local menu
-    for _, candidate in ipairs(FindAllOf("WBP_MainMenu_C") or {}) do
+    for _, candidate in ipairs(menus) do
         if valid(candidate) and candidate:IsVisible() then menu = candidate; break end
     end
-    if not menu then view.open = false; view.widget:SetVisibility(1); return end
+    if not menu then view.open = false; view.version = nil; UI.visibility(view.widget, 1); return end
     if not valid(view.tab) or not valid(view.menu) or view.menu:GetAddress() ~= menu:GetAddress() then
         if valid(view.tab) then view.tab:RemoveFromParent() end
         -- shortcut: native tab cycling skips this entry; extend navigation if keyboard/controller access is needed.
         view.tab = UI.create(view.controller, "WBP_PinTab")
         menu.HorizontalBox_Tab:AddChildToHorizontalBox(view.tab)
         view.menu = menu
+        view.version = nil
         print("[PalworldPinItems] Pinned tab added")
     end
-    view.widget:SetVisibility(view.open and 4 or 1)
-    if view.open then
+    UI.visibility(view.widget, view.open and 4 or 1)
+    if not view.open then view.version = nil end
+    if view.open and (view.version ~= version or view.rendered_page ~= view.page) then
         local models, page, pages = Recipes.display(tracker, view.page, item_name, owned_count)
         view.page = page
         UI.draw(view.cards, models, view.controller)
-        view.widget.PageLabel:SetText(FText(page .. " / " .. pages))
-        view.widget.PreviousButton:SetIsEnabled(page > 1)
-        view.widget.NextButton:SetIsEnabled(page < pages)
+        UI.text(view.widget.PageLabel, page .. " / " .. pages)
+        enabled(view.widget.PreviousButton, page > 1)
+        enabled(view.widget.NextButton, page < pages)
+        view.version, view.rendered_page = version, page
     end
 end
 
