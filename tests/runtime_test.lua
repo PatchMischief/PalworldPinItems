@@ -5,6 +5,7 @@ local unsafe_name_calls = 0
 local scans, ui_writes = 0, 0
 local count_reads = 0
 local test_time = 0
+local viewport_height, prepasses = 2160, 0
 os.clock = function() return test_time end
 local object_address = 1000
 local function object(fields)
@@ -37,6 +38,17 @@ function FName(value) return object({ToString = function() return value end}) en
 function FText(value) return object({text = value, ToString = function(self) return self.text end}) end
 local ui = widget({RootCanvas = field(), Panel = object({IsHovered = function() return false end}), HoverName = field(),
     PinButton = field(), PinLabel = field(), PinnedList = panel(), Heading = field(), ClearButton = field()})
+ui.ForceLayoutPrepass = function() prepasses = prepasses + 1 end
+ui.Panel.GetDesiredSize = function()
+    local height = 70
+    for _, card in ipairs(ui.PinnedList.children) do
+        if card.visibility ~= 1 then
+            height = height + 24
+            for _, row in ipairs(card.Materials.children) do if row.visibility ~= 1 then height = height + 20 end end
+        end
+    end
+    return {Y = height}
+end
 local page_view
 local function pinned_text()
     local lines = {}
@@ -75,6 +87,8 @@ local access = object({BP_FindRow = function(_, id, result)
     return {Product_Id = FName("Arrow"), Product_Count = 3, Material1_Id = FName("Wood"), Material1_Count = 2}
 end})
 local objects = {
+    ["/Script/UMG.Default__WidgetLayoutLibrary"] = object({GetViewportSize = function() return {Y = viewport_height} end,
+        GetViewportScale = function() return 1 end}),
     ["/Script/Engine.Default__GameplayStatics"] = object({GetPlayerController = function(_, context, index)
         assert(context == viewport and index == 0, "Controller lookup must use the local viewport")
         return pc
@@ -152,7 +166,13 @@ local function inventory_event(target, method, helper)
     hooks["/Script/Pal." .. (helper and "PalItemContainerMultiHelper" or "PalPlayerInventoryData") .. ":" .. method]({get = function() return target end})
 end
 function RegisterKeyBind(key, modifiers, callback) binds[#binds + 1] = callback or modifiers end
-function LoopAsync(_, callback) tick = callback end
+function LoopAsync() error("Periodic refresh must not run on UE4SS's shared async Lua state") end
+local loop_registrations = 0
+function LoopInGameThreadWithDelay(delay, callback)
+    assert(delay == 150)
+    loop_registrations = loop_registrations + 1
+    tick = callback
+end
 function ExecuteInGameThread(callback) callback() end
 Key, ModifierKey = {F8 = 119}, {SHIFT = 16}
 package.preload.UEHelpers = function() return {GetPlayerController = function() FindAllOf("PlayerController"); return pc end,
@@ -260,6 +280,16 @@ assert(count_reads == 0, "Unchanged inventory must not be recounted every update
 assert(draw_calls == 0, "Unchanged pinned cards must not be rebuilt every update")
 assert(scans == 0 and ui_writes == 0, "Steady pinned/menu UI must not scan globally or rewrite unchanged widgets")
 UI.draw = native_draw
+viewport_height = 1080
+tick()
+assert(visible_cards(ui.PinnedList) < 5 and visible_cards(ui.PinnedList) > 0, "Small HUD gaps must keep whole cards, with overflow on the Pinned page")
+assert(ui.Panel:GetDesiredSize().Y <= UI.hud_height(pc))
+local prepass_count = prepasses
+for _ = 1, 100 do tick() end
+assert(prepasses == prepass_count, "Steady HUD layout must not measure cards repeatedly")
+viewport_height = 2160
+tick()
+assert(visible_cards(ui.PinnedList) == 5, "A larger viewport must restore cards that fit")
 count_reads = 0
 inventory_event(object(), "OnUpdateInventoryContainer")
 tick()
@@ -303,6 +333,24 @@ hooks["/Game/Mods/PalworldPinItems/WBP_PinTab.WBP_PinTab_C:OpenPinned"]()
 menu.IsVisible = function() return false end
 tick()
 assert(page_view.visibility == 1, "Closing the player menu must also close the pinned view")
+menu.IsVisible = function() return true end
+tick()
+local remove_class = "/Game/Mods/PalworldPinItems/WBP_PinCard.WBP_PinCard_C:RemovePin"
+local first_card = ui.PinnedList.children[1]
+local first_name = first_card.ItemName.text
+local writes_before, prepasses_before = ui_writes, prepasses
+hooks[remove_class]({get = function() return first_card end})
+assert(ui_writes == writes_before and prepasses == prepasses_before, "X must not redraw or prepass its widget inside the click dispatch")
+tick()
+assert(ui.PinnedList.children[1].ItemName.text ~= first_name, "HUD X must remove its bound pin, independently of hover")
+hooks["/Game/Mods/PalworldPinItems/WBP_PinTab.WBP_PinTab_C:OpenPinned"]()
+hooks[page_class .. "NextPage"]()
+assert(page_view.PageLabel.text == "2 / 2" and visible_cards(page_view.PinnedList) == 1)
+hooks[remove_class]({get = function() return page_view.PinnedList.children[1] end})
+tick()
+assert(page_view.PageLabel.text == "1 / 1" and visible_cards(page_view.PinnedList) == 5, "Removing the final second-page pin must clamp the page and retain the other pins")
+hooks[remove_class]({get = function() return object() end})
+assert(visible_cards(page_view.PinnedList) == 5, "Unknown widget clicks must leave pins intact")
 hooks[class .. ":ClearPins"]()
 hud.HoverWidget = nil
 hud.IsAnyOverlayUIActive = function() return false end
@@ -321,15 +369,13 @@ end
 UI.text(wrapper(), "Same native widget")
 UI.text(wrapper(), "Same native widget")
 assert(wrapper_writes == 1, "Fresh Lua wrappers for one native widget must share the write cache")
-local queued = {}
-ExecuteInGameThread = function(callback) queued[#queued + 1] = callback end
-tick(); tick(); tick()
-assert(#queued == 1, "A busy game thread must not accumulate update callbacks")
-queued[1]()
+assert(loop_registrations == 1, "Register one persistent game-thread timer")
+local original_hud = pc.GetHUD
+pc.GetHUD = function() error("Injected transient HUD failure") end
 tick()
-assert(#queued == 2, "Completing an update must allow the next one")
-queued[2]()
-ExecuteInGameThread = function(callback) callback() end
+pc.GetHUD = original_hud
+tick()
+assert(loop_registrations == 1, "An update error must not stall or duplicate the timer")
 menu.IsValid = function() return false end
 hud.IsAnyOverlayUIActive = function() return true end
 local replacement = created("WBP_MainMenu_C", object({IsVisible = function() return true end, HorizontalBox_Tab = panel()}))

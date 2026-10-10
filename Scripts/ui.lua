@@ -102,6 +102,7 @@ end
 function UI.draw(cards, models, controller)
     for index, card in ipairs(cards) do
         local model = models[index]
+        card.key = model and model.key or nil
         UI.visibility(card.widget, model and 4 or 1)
         if model then
             UI.text(card.widget.ItemName, model.title)
@@ -126,6 +127,23 @@ function UI.draw(cards, models, controller)
             end
         end
     end
+end
+
+function UI.hud_height(controller)
+    local layout = StaticFindObject("/Script/UMG.Default__WidgetLayoutLibrary")
+    return math.max(0, layout:GetViewportSize(controller).Y / layout:GetViewportScale(controller) * 0.27 - 16)
+end
+
+function UI.fit_hud(widget, cards, count, height)
+    -- Keep whole cards at their normal font size; overflow stays in the Pinned page.
+    widget:ForceLayoutPrepass()
+    while count > 0 and widget.Panel:GetDesiredSize().Y > height do
+        UI.visibility(cards[count].widget, 1)
+        cards[count].key = nil
+        count = count - 1
+        widget:ForceLayoutPrepass()
+    end
+    return count
 end
 
 function UI.menu(controller)

@@ -32,7 +32,7 @@ The standalone Lua suite checks duplicate stacks, missing/empty items, one colle
 
 The native startup check registered all seven base update hooks plus the metadata request hook and created the UI without a mod error. A temporary read-only probe verified the collection/base/network API signatures and confirmed that `BaseCampOnly` is enum value 1 in the installed game. Cooking the five unchanged widgets completed with zero errors or warnings. The probe log is `build/diagnostics/storage-native-smoke.log`; the temporary installed probe is removed after validation.
 
-After the crash patch, the user confirmed correct chest counts, no crash, and no observed FPS drops in their base. This is qualitative gameplay confirmation, not a measured FPS benchmark. Switching between two bases remains covered by fixtures only: the test save has no second base yet. Remote-client metadata replication and private/locked-chest permissions also remain unverified in gameplay. Automatic tests use fixtures for native results; the startup probe alone did not prove real chest eligibility or replication delivery.
+After the crash patch, the user confirmed correct chest counts, no crash, and no observed FPS drops in their base. This is qualitative gameplay confirmation, not a measured FPS benchmark. On 2026-10-11, the user also confirmed correct pinned item counts across two bases. Remote-client metadata replication and private/locked-chest permissions remain unverified in gameplay. Automatic tests use fixtures for native results; the startup probe alone did not prove real chest eligibility or replication delivery.
 
 ## First-pin crash investigation
 
@@ -42,4 +42,8 @@ The patch excludes authoritative controllers from acquiring the network componen
 
 ## Live return check
 
-When a second base becomes available, visit it with different stock: its name and totals should replace the first base's without combining them. Outside either base, only the backpack should count. Additional checks remain for private/locked chests and remote multiplayer replication. Material transfers, native menu closure, clearing/re-pinning, and seven or more pins remain useful regression checks. The user authorized committing and pushing the currently confirmed version before the second-base test.
+Two-base counting was confirmed on 2026-10-11. Additional checks remain for private/locked chests and remote multiplayer replication. Outside either base, only the backpack should count. Material transfers, native menu closure, clearing/re-pinning, and seven or more pins remain useful regression checks.
+
+## Raw base labels
+
+The 2026-10-11 screenshot shows Japanese `新規生成拠点テンプレート名5(仮)`, roughly "Newly generated base template name 5 (temporary)." That template literal exists in the installed game executable. The mod displays `GetBaseCampName()` directly; it does not localize or invent a name. Base identity, stock-cache invalidation, and event filtering use the GUID, not the displayed name. A future display-only alias would therefore leave counts and save data unchanged; actually renaming a game base would change game/save state. The user requested an explanation before any name change, so this patch preserves the name behavior.

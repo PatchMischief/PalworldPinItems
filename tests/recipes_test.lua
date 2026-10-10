@@ -54,6 +54,13 @@ equal(#last, 2)
 equal(clamped, 2)
 equal(tracker.pins[7].icon_id, "Wood")
 local before_clear = tracker.version
+equal(Recipes.remove(tracker, "craft:Pin6"), true)
+equal(tracker.by_key["craft:Pin6"], nil)
+equal(tracker.version, before_clear + 1)
+equal(Recipes.remove(tracker, "craft:Pin6"), false)
+equal(tracker.version, before_clear + 1)
+equal(display(2)[1].key, "craft:Pin5")
+before_clear = tracker.version
 Recipes.clear(tracker)
 equal(#tracker.pins, 0)
 equal(next(tracker.by_key), nil)

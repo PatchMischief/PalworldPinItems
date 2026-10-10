@@ -33,16 +33,19 @@ function Recipes.is_pinned(tracker, recipe)
     return tracker.by_key[recipe.key] ~= nil
 end
 
+function Recipes.remove(tracker, key)
+    if not tracker.by_key[key] then return false end
+    for index, pin in ipairs(tracker.pins) do
+        if pin.key == key then table.remove(tracker.pins, index); break end
+    end
+    tracker.by_key[key] = nil
+    tracker.version = tracker.version + 1
+    return true
+end
+
 function Recipes.toggle(tracker, recipe)
     if not recipe then return false end
-    if tracker.by_key[recipe.key] then
-        for index, pin in ipairs(tracker.pins) do
-            if pin.key == recipe.key then table.remove(tracker.pins, index); break end
-        end
-        tracker.by_key[recipe.key] = nil
-        tracker.version = tracker.version + 1
-        return false
-    end
+    if Recipes.remove(tracker, recipe.key) then return false end
     -- Store a detached snapshot, never a live tooltip/recipe UObject.
     local pin = {key = recipe.key, name = recipe.name, kind = recipe.kind, icon_id = recipe.icon_id, icon_path = recipe.icon_path,
         output = recipe.output, materials = {}}
@@ -66,7 +69,7 @@ function Recipes.display(tracker, page, item_name, owned_count)
     local cards = {}
     for index = (page - 1) * 5 + 1, math.min(page * 5, #tracker.pins) do
         local pin = tracker.pins[index]
-        local card = {title = pin.name .. (pin.output > 1 and (" x" .. pin.output) or ""),
+        local card = {key = pin.key, title = pin.name .. (pin.output > 1 and (" x" .. pin.output) or ""),
             kind = pin.kind, icon_id = pin.icon_id, icon_path = pin.icon_path, materials = {}}
         for _, material in ipairs(pin.materials) do
             local owned = owned_count and owned_count(material.id)

@@ -184,7 +184,8 @@ local function refresh()
         return owned and (owned + Storage.count(storage_cache, id)) or nil
     end
     local hover_key = hovered and hovered.key or ""
-    if rendered.version ~= version or rendered.hover ~= hover_key then
+    local height = (hovered or has_pins) and UI.hud_height(owner) or 0
+    if rendered.version ~= version or rendered.hover ~= hover_key or rendered.height ~= height then
         UI.visibility(widget, (hovered or has_pins) and 4 or 1) -- SelfHitTestInvisible / Collapsed.
         UI.text(widget.HoverName, hovered and hovered.name or storage_cache.label)
         UI.visibility(widget.HoverName, (hovered or has_pins) and 0 or 1)
@@ -192,9 +193,10 @@ local function refresh()
         UI.text(widget.PinLabel, Recipes.is_pinned(tracker, hovered) and "Unpin this item  [F8]" or "Pin this item  [F8]")
         local models = Recipes.display(tracker, 1, item_name, owned_count)
         UI.draw(cards, models, owner)
-        UI.text(widget.Heading, "Pinned items" .. (#tracker.pins > 5 and ("  (5/" .. #tracker.pins .. "; see Pinned tab)") or ""))
         UI.visibility(widget.ClearButton, has_pins and 0 or 1)
-        rendered.version, rendered.hover = version, hover_key
+        local shown = UI.fit_hud(widget, cards, #models, height)
+        UI.text(widget.Heading, "Pinned items" .. (#tracker.pins > shown and ("  (" .. shown .. "/" .. #tracker.pins .. "; see Pinned tab)") or ""))
+        rendered.version, rendered.hover, rendered.height = version, hover_key, height
     end
     UI.update_menu(menu_view, tracker, item_name, owned_count,
         widgets("WBP_MainMenu_C"), version, storage_cache.label)
@@ -239,6 +241,22 @@ local function ensure_widget(controller)
         RegisterHook(asset .. ":ClearPins", function() clear() end)
         UI.class("WBP_PinTab")
         UI.class("WBP_PinPage")
+        UI.class("WBP_PinCard")
+        RegisterHook("/Game/Mods/PalworldPinItems/WBP_PinCard.WBP_PinCard_C:RemovePin", function(context)
+            local source = context:get()
+            if not valid(source) or not cards or not menu_view then return end
+            for _, list in ipairs({cards, menu_view.cards}) do
+                for _, card in ipairs(list) do
+                    if valid(card.widget) and card.widget:GetAddress() == source:GetAddress() then
+                        -- Finish Slate's click dispatch before hiding/rebinding the clicked card.
+                        if card.key and Recipes.remove(tracker, card.key) then
+                            print("[PalworldPinItems] Removed " .. card.key)
+                        end
+                        return
+                    end
+                end
+            end
+        end)
         local page_asset = "/Game/Mods/PalworldPinItems/WBP_PinPage.WBP_PinPage_C:"
         RegisterHook("/Game/Mods/PalworldPinItems/WBP_PinTab.WBP_PinTab_C:OpenPinned", function()
             menu_view.open = not menu_view.open
@@ -312,17 +330,12 @@ end
 
 RegisterKeyBind(Key.F8, function() ExecuteInGameThread(pin) end)
 RegisterKeyBind(Key.F8, {ModifierKey.SHIFT}, function() ExecuteInGameThread(clear) end)
-local update_pending = false
-LoopAsync(150, function()
-    if update_pending then return end
-    update_pending = true
-    ExecuteInGameThread(function()
-        local ok, message = xpcall(update, debug.traceback)
-        update_pending = false
-        if not ok and message ~= last_error then
-            print("[PalworldPinItems] " .. tostring(message))
-            last_error = message
-        elseif ok then last_error = nil end
-    end)
+-- UE4SS async Lua shares its state with hooks; keep the recurring work on the game thread.
+LoopInGameThreadWithDelay(150, function()
+    local ok, message = xpcall(update, debug.traceback)
+    if not ok and message ~= last_error then
+        print("[PalworldPinItems] " .. tostring(message))
+        last_error = message
+    elseif ok then last_error = nil end
 end)
 print("[PalworldPinItems] Loaded; hover a craft/build recipe and use Pin this item or F8.")
