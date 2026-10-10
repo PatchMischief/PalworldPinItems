@@ -18,7 +18,7 @@ if ((Test-Path -LiteralPath $taskMod) -or (Test-Path -LiteralPath $taskInstalled
     if (Test-Path -LiteralPath $taskInstalledPak) { Copy-Item -LiteralPath $taskInstalledPak -Destination $taskBackup }
 }
 New-Item -ItemType Directory -Force -Path "$taskMod/Scripts",$taskPaks | Out-Null
-Copy-Item -LiteralPath "$PSScriptRoot/Scripts/main.lua","$PSScriptRoot/Scripts/recipes.lua" -Destination "$taskMod/Scripts" -Force
+Get-ChildItem -LiteralPath "$PSScriptRoot/Scripts" -Filter '*.lua' -File | Copy-Item -Destination "$taskMod/Scripts" -Force
 Set-Content -LiteralPath "$taskMod/enabled.txt" -Value ''
 Copy-Item -LiteralPath $taskPak -Destination $taskInstalledPak -Force
 $taskList = Join-Path $taskLoader 'Mods/mods.txt'

@@ -6,5 +6,6 @@ assert Path('Scripts/recipes.lua').exists(), 'Run this check from PalworldPinIte
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute(Path('tests/recipes_test.lua').read_text(encoding='utf-8'))
 lua.execute("assert(loadfile('Scripts/main.lua'))")
+lua.execute("assert(loadfile('Scripts/ui.lua'))")
 print('Runtime Lua syntax passed.')
 LuaRuntime(unpack_returned_tuples=True).execute(Path('tests/runtime_test.lua').read_text(encoding='utf-8'))

@@ -19,7 +19,8 @@ function Recipes.from_row(kind, id, row, name)
         ingredients[#ingredients + 1] = {id = material, count = counts[material]}
     end
     return {key = kind .. ":" .. id, id = id, kind = kind,
-        name = name or id, output = math.max(1, tonumber(row.Product_Count) or 1),
+        name = name or id, icon_id = kind == "craft" and (row.Product_Id or id) or id,
+        output = math.max(1, tonumber(row.Product_Count) or 1),
         materials = ingredients}
 end
 
@@ -41,7 +42,8 @@ function Recipes.toggle(tracker, recipe)
         if pin.key == recipe.key then table.remove(tracker.pins, index); return false end
     end
     -- Store a detached snapshot, never a live tooltip/recipe UObject.
-    local pin = {key = recipe.key, name = recipe.name, output = recipe.output, materials = {}}
+    local pin = {key = recipe.key, name = recipe.name, kind = recipe.kind, icon_id = recipe.icon_id, icon_path = recipe.icon_path,
+        output = recipe.output, materials = {}}
     for _, material in ipairs(recipe.materials) do
         pin.materials[#pin.materials + 1] = {id = material.id, count = material.count}
     end
@@ -49,18 +51,23 @@ function Recipes.toggle(tracker, recipe)
     return true
 end
 
-function Recipes.render(tracker, item_name, owned_count)
-    local lines = {}
-    for _, pin in ipairs(tracker.pins) do
-        lines[#lines + 1] = pin.name .. (pin.output > 1 and (" x" .. pin.output) or "")
-        if #pin.materials == 0 then lines[#lines + 1] = "  No materials required" end
+function Recipes.display(tracker, page, item_name, owned_count)
+    local pages = math.max(1, math.ceil(#tracker.pins / 5))
+    page = math.max(1, math.min(page, pages))
+    local cards = {}
+    for index = (page - 1) * 5 + 1, math.min(page * 5, #tracker.pins) do
+        local pin = tracker.pins[index]
+        local card = {title = pin.name .. (pin.output > 1 and (" x" .. pin.output) or ""),
+            kind = pin.kind, icon_id = pin.icon_id, icon_path = pin.icon_path, materials = {}}
         for _, material in ipairs(pin.materials) do
             local owned = owned_count and owned_count(material.id)
-            lines[#lines + 1] = "  " .. item_name(material.id) .. ": " .. material.count .. "/" .. (owned or "?")
+            card.materials[#card.materials + 1] = {id = material.id,
+                text = item_name(material.id) .. ": " .. (owned or "?") .. "/" .. material.count,
+                complete = owned ~= nil and owned >= material.count}
         end
-        lines[#lines + 1] = ""
+        cards[#cards + 1] = card
     end
-    return table.concat(lines, "\n")
+    return cards, page, pages
 end
 
 return Recipes

@@ -1,8 +1,11 @@
 local UEHelpers = require("UEHelpers")
 local Recipes = require("recipes")
+local UI = require("ui")
 local tracker = Recipes.new_tracker()
 local widget, owner, hovered
+local cards, menu_view
 local hooks_ready = false
+local menu_hooks_ready = false
 local labels = {}
 local last_error
 local asset = "/Game/Mods/PalworldPinItems/WBP_PinItems.WBP_PinItems_C"
@@ -101,7 +104,13 @@ local function current_recipe()
             local button = get(icon, "WBP_PalInvisibleButton")
             if valid(icon) and icon:IsVisible() and (icon:IsHovered() or (valid(button) and button:IsHovered())) then
                 local row = get(icon, "MyBuildObjectData")
-                if row then return build_recipe(name(get(row, "MapObjectId")), row) end
+                if row then
+                    local recipe = build_recipe(name(get(row, "MapObjectId")), row)
+                    local brush = get(get(icon, "Image_Icon"), "Brush")
+                    local texture = get(brush, "ResourceObject")
+                    if recipe and valid(texture) then recipe.icon_path = texture:GetFullName():match("^[^ ]+ (.+)$") end
+                    return recipe
+                end
             end
         end
     end
@@ -143,11 +152,22 @@ local function refresh()
     local state = owner:GetPalPlayerState()
     local inventory = valid(state) and state:GetInventoryData() or nil
     local counts = {}
-    widget.PinnedText:SetText(FText(Recipes.render(tracker, item_name, function(id)
+    local function owned_count(id)
         if not valid(inventory) then return nil end
         if counts[id] == nil then counts[id] = inventory:CountItemNum(FName(id)) end
         return counts[id]
-    end)))
+    end
+    local models = Recipes.display(tracker, 1, item_name, owned_count)
+    UI.draw(cards, models, owner)
+    widget.Heading:SetText(FText("Pinned items" .. (#tracker.pins > 5 and ("  (5/" .. #tracker.pins .. "; see Pinned tab)") or "")))
+    UI.update_menu(menu_view, tracker, item_name, owned_count)
+    if not menu_hooks_ready then
+        local native = "/Game/Pal/Blueprint/UI/UserInterface/MainMenu/WBP_MainMenu.WBP_MainMenu_C:SelectByMainMenuType"
+        if valid(StaticFindObject(native)) then
+            RegisterHook(native, function() if menu_view then menu_view.open = false end end)
+            menu_hooks_ready = true
+        end
+    end
     widget.ClearButton:SetVisibility(has_pins and 0 or 1)
 end
 
@@ -166,6 +186,8 @@ end
 local function ensure_widget(controller)
     if valid(widget) and valid(owner) and owner:GetAddress() == controller:GetAddress() then return true end
     if valid(widget) then widget:RemoveFromParent() end
+    if menu_view and valid(menu_view.widget) then menu_view.widget:RemoveFromParent() end
+    if menu_view and valid(menu_view.tab) then menu_view.tab:RemoveFromParent() end
     owner = controller
     local class = StaticFindObject(asset)
     if not valid(class) then
@@ -178,6 +200,17 @@ local function ensure_widget(controller)
     if not hooks_ready then
         RegisterHook(asset .. ":PinHovered", function() pin() end)
         RegisterHook(asset .. ":ClearPins", function() clear() end)
+        UI.class("WBP_PinTab")
+        UI.class("WBP_PinPage")
+        local page_asset = "/Game/Mods/PalworldPinItems/WBP_PinPage.WBP_PinPage_C:"
+        RegisterHook("/Game/Mods/PalworldPinItems/WBP_PinTab.WBP_PinTab_C:OpenPinned", function()
+            menu_view.open = not menu_view.open
+            print("[PalworldPinItems] Pinned view " .. (menu_view.open and "opened" or "closed"))
+            refresh()
+        end)
+        RegisterHook(page_asset .. "PreviousPage", function() menu_view.page = math.max(1, menu_view.page - 1); refresh() end)
+        RegisterHook(page_asset .. "NextPage", function() menu_view.page = menu_view.page + 1; refresh() end)
+        RegisterHook(page_asset .. "ClosePinned", function() menu_view.open = false; refresh() end)
         hooks_ready = true
     end
     local library = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
@@ -186,6 +219,8 @@ local function ensure_widget(controller)
     widget.RootCanvas:SetVisibility(4)
     widget:SetVisibility(1)
     widget:AddToViewport(100)
+    cards = UI.cards(widget.PinnedList, controller)
+    menu_view = UI.menu(controller)
     print("[PalworldPinItems] UI ready")
     return true
 end
@@ -194,16 +229,23 @@ local function update()
     local controller = UEHelpers.GetPlayerController()
     if not valid(controller) then
         if valid(widget) then widget:RemoveFromParent() end
+        if menu_view and valid(menu_view.widget) then menu_view.widget:RemoveFromParent() end
+        if menu_view and valid(menu_view.tab) then menu_view.tab:RemoveFromParent() end
         widget, owner, hovered = nil, nil, nil
+        cards, menu_view = nil, nil
         return
     end
     -- Load and validate the collapsed widget before entering a save.
     ensure_widget(controller)
-    if not valid(controller:GetHUD()) then widget:SetVisibility(1); hovered = nil; return end
+    if not valid(controller:GetHUD()) then
+        widget:SetVisibility(1); menu_view.widget:SetVisibility(1); menu_view.open = false; hovered = nil; return
+    end
     -- Only show on the local in-game HUD; no visible UI on the title screen.
     local hud_name = controller:GetHUD():GetFullName()
     if not hud_name:find("PalHUD_InGame", 1, true) and not hud_name:find("PalHUDInGame", 1, true) then
         widget:SetVisibility(1)
+        menu_view.widget:SetVisibility(1)
+        menu_view.open = false
         hovered = nil
         return
     end

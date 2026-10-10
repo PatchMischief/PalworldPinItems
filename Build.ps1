@@ -27,7 +27,7 @@ $taskPackage = Join-Path $taskOutput 'package'
 $taskLua = Join-Path $taskPackage 'Pal/Binaries/Win64/ue4ss/Mods/PalworldPinItems/Scripts'
 $taskPaks = Join-Path $taskPackage 'Pal/Content/Paks'
 New-Item -ItemType Directory -Force -Path $taskLua,$taskPaks | Out-Null
-Copy-Item -LiteralPath (Join-Path $taskRoot 'Scripts/main.lua'),(Join-Path $taskRoot 'Scripts/recipes.lua') -Destination $taskLua -Force
+Get-ChildItem -LiteralPath (Join-Path $taskRoot 'Scripts') -Filter '*.lua' -File | Copy-Item -Destination $taskLua -Force
 Set-Content -LiteralPath (Join-Path (Split-Path $taskLua) 'enabled.txt') -Value ''
 Copy-Item -LiteralPath "$taskOutput/PalworldPinItems_P.pak" -Destination $taskPaks -Force
 Copy-Item -LiteralPath (Join-Path $taskRoot 'README.md') -Destination $taskPackage -Force
