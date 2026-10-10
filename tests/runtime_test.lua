@@ -58,7 +58,15 @@ local inventory = object({CountItemNum = function(_, id) count_reads = count_rea
 inventory.InventoryMultiHelper = object()
 local state = object({GetInventoryData = function() return inventory end})
 local pc = object({GetHUD = function() return hud end, GetAddress = function() return 1 end,
-    GetPalPlayerState = function() return state end})
+    GetPalPlayerState = function() return state end, HasAuthority = function() return true end})
+local active_base, storage_reads = nil, 0
+local base_wood = 7
+local function base_id(value) return {A = value, B = 0, C = 0, D = 0} end
+local base_a = object({GetId = function() return base_id(1) end, GetBaseCampName = function() return "Forest" end})
+local base_b = object({GetId = function() return base_id(2) end, GetBaseCampName = function() return "Desert" end})
+local player = object({InsideBaseCampCheckComponent = object({IsInsideBaseCamp = function() return active_base ~= nil end,
+    GetInsideBaseCampModel = function() return active_base end})})
+pc.Transmitter = object({GetBaseCamp = function() error("Standalone player must not enter metadata RPC path") end})
 local viewport = object()
 local access = object({BP_FindRow = function(_, id, result)
     assert(type(result) == "table", "UE4SS out parameters require a Lua table")
@@ -75,6 +83,11 @@ local objects = {
         return object({GetStaticItemData = function(_, id)
             return {IconTexture = "icon:" .. id:ToString(), IsValid = function() return id:ToString() ~= "None" and id:ToString() ~= "WoodenFoundation" end}
         end})
+    end, GetPlayerCharacter = function() return player end}),
+    ["/Script/Pal.Default__PalItemUtility"] = object({CollectLocalPlayerControllableAllItemInfos = function(_, context, output, collect_type)
+        assert(context == pc and collect_type == 1)
+        storage_reads = storage_reads + 1
+        output[1] = {StaticItemId = FName("Wood"), Num = active_base == base_a and base_wood or 50}
     end}),
     ["/Script/Engine.Default__KismetSystemLibrary"] = object({MakeSoftClassPath = function(_, path) return path end,
         Conv_SoftClassPathToSoftClassRef = function(_, path) return path end,
@@ -99,7 +112,7 @@ local objects = {
         if class.path:find("WBP_PinCard.", 1, true) then return widget({ItemName = field(), ItemIcon = field(), Materials = panel()}) end
         if class.path:find("WBP_PinMaterial.", 1, true) then return widget({MaterialName = field(), MaterialIcon = field(), Complete = field()}) end
         if class.path:find("WBP_PinPage.", 1, true) then
-            page_view = widget({PinnedList = panel(), PageLabel = field(), PreviousButton = field(), NextButton = field()}); return page_view
+            page_view = widget({PinnedList = panel(), PageHeading = field(), PageLabel = field(), PreviousButton = field(), NextButton = field()}); return page_view
         end
         if class.path:find("WBP_PinTab.", 1, true) then return widget({OpenButton = field()}) end
         error("Unknown class: " .. class.path)
@@ -111,6 +124,11 @@ for _, method in ipairs({"OnUpdateInventoryContainer", "OnUpdateEssentialContain
 end
 for _, method in ipairs({"OnUpdateContainerContent", "OnRep_Containers"}) do
     objects["/Script/Pal.PalItemContainerMultiHelper:" .. method] = object()
+end
+for _, method in ipairs({"OnUpdateItemContainer", "OnRep_ItemStackRepInfoArray", "OnAvailableConcreteModel",
+    "OnNotAvailableConcreteModel", "OnUpdatePrivateLockPlayerUId_ServerInternal", "OnUpdatePasswordLock_ServerInternal",
+    "OnUpdateGuildSecurity_ServerInternal"}) do
+    objects["/Script/Pal.PalBaseCampModuleItemStackInfo:" .. method] = object()
 end
 function StaticFindObject(path) return objects[path] or {IsValid = function() return false end} end
 local instances = {}
@@ -256,6 +274,31 @@ assert(count_reads == 2, "Slow reconciliation must recover changes if an invento
 count_reads = 0
 tick()
 assert(count_reads == 0, "Reconciliation must not resume per-update polling")
+hud.IsAnyOverlayUIActive = function() return false end
+active_base = base_a
+tick()
+assert(pinned_text():find("Wood: 8/2", 1, true) and ui.HoverName.text == "Backpack + Forest")
+assert(storage_reads == 1, "Every visible card must share one base snapshot")
+for _ = 1, 100 do tick() end
+assert(storage_reads == 1, "Pinned recipes must not repeatedly scan base storage")
+local function base_event(value)
+    hooks["/Script/Pal.PalBaseCampModuleItemStackInfo:OnRep_ItemStackRepInfoArray"]({get = function()
+        return object({OwnerBaseCampId = base_id(value)}) end})
+end
+base_event(2); tick()
+assert(storage_reads == 1)
+base_wood = 9
+base_event(1); tick()
+assert(pinned_text():find("Wood: 10/2", 1, true) and storage_reads == 2)
+hooks["/Game/Mods/PalworldPinItems/WBP_PinTab.WBP_PinTab_C:OpenPinned"]()
+assert(page_view.PageHeading.text == "Pinned items · Backpack + Forest")
+active_base = base_b
+tick()
+assert(pinned_text():find("Wood: 51/2", 1, true) and ui.HoverName.text == "Backpack + Desert")
+active_base = nil
+tick()
+assert(pinned_text():find("Wood: 1/2", 1, true) and ui.HoverName.text == "Backpack")
+assert(ui.PinnedList.children[1].Materials.children[1].Complete.visibility == 2, "Leaving a base must remove its completion check")
 hooks["/Game/Mods/PalworldPinItems/WBP_PinTab.WBP_PinTab_C:OpenPinned"]()
 menu.IsVisible = function() return false end
 tick()

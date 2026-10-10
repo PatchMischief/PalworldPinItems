@@ -1,0 +1,45 @@
+# Current-base storage counts
+
+The performance version was confirmed in-game and pushed as `28ea0ba`. This subsequent feature adds base storage to the owned side of each material's owned/needed count. On 2026-10-10, the user confirmed that the patched version pins without crashing, reports correct chest counts, and showed no FPS drops. The user authorized publishing this version despite lacking a second base for a live switching test. No ZIP was created or updated.
+
+## Scope and UI
+
+The pin list still belongs to the current game session. Counts use the backpack plus controllable storage in the base the local player is currently inside. Outside a base they use only the backpack. Counts from different bases are never pooled or retained as available stock. Moving from Forest to Desert keeps the recipes and replaces Forest's material totals with Desert's totals. The HUD source line appears when no recipe is hovered, and the Pinned page heading shows `Backpack + Forest`, `Backpack + Desert`, or `Backpack`.
+
+`PalUtility.GetPlayerCharacter` supplies the player's `InsideBaseCampCheckComponent`. Its `IsInsideBaseCamp` and `GetInsideBaseCampModel` determine the scope. The base model's GUID, copied as four numeric fields, identifies the base; `GetBaseCampName` supplies the label. The controller's native address separates player/world contexts. Pins do not trigger global actor/chest discovery or a nearest-base search.
+
+## Collection and data structure
+
+`Scripts/storage.lua` calls `PalItemUtility.CollectLocalPlayerControllableAllItemInfos` once when a base snapshot is needed, with `EPalItemInfoCollectType.BaseCampOnly` (1). The API supplies item-ID/number rows for local-player-controllable storage; the mod delegates storage eligibility and permissions to the game rather than manually interpreting chest locks. Personal inventory is excluded from that collection and added exactly once through the existing `Scripts/inventory.lua` cache.
+
+Lua copies each returned row immediately into `counts[item_id]`, adding duplicates and ignoring empty/nonpositive entries. It retains detached strings and numbers, never reflected output-array entries. Missing item IDs return zero. The same snapshot serves every HUD card and Pinned page, including newly visible ingredients. Unknown personal inventory stays unknown and cannot show a completion check.
+
+For **n returned storage rows** and **u unique item IDs**, hash aggregation takes O(n) expected time and O(u) memory. Cached item lookup averages O(1). An unchanged update performs no bulk collection or storage-row iteration. A dirty update does one collection, one linear aggregation, and bounded rendering of five recipes per visible view. There is no materials-times-chests nested loop in Lua. Pending subscription releases are keyed by base GUID and visited linearly in the small number of outstanding base contexts until released. A linked list or search tree would add complexity without improving the cached item query.
+
+The PMK native implementations are stubs. Consequently, the exact internal complexity of the game's bulk collection and existing personal `CountItemNum` cannot be proven from this SDK. The stated O(n)/O(1) bounds apply to the mod's own work after the native collection, not an invented guarantee about native game internals.
+
+## Updates and replication
+
+Seven native post-hooks on `PalBaseCampModuleItemStackInfo` observe `OnUpdateItemContainer`, `OnRep_ItemStackRepInfoArray`, `OnAvailableConcreteModel`, `OnNotAvailableConcreteModel`, `OnUpdatePrivateLockPlayerUId_ServerInternal`, `OnUpdatePasswordLock_ServerInternal`, and `OnUpdateGuildSecurity_ServerInternal`. The publishing module's `OwnerBaseCampId` must match the active base GUID. Events for another base or the previous base do not invalidate current totals. Multiple events coalesce into one dirty snapshot for the next game-thread refresh.
+
+On remote clients, `PalPlayerController.Transmitter.GetBaseCamp()` exposes the `PalNetworkBaseCampComponent` metadata subscription. The mod requests `RequestReplicateBaseCampItemStackInfo_ToServer(base_guid, true)` when pins need base counts, and false on leaving/switching/clearing. It saves the old base GUID explicitly so cleanup cannot unsubscribe a newly entered base accidentally. Releases wait for native menu overlays to close, since the game's UI shares this subscription. An additional post-hook watches native false requests for the active component/base and resumes the mod's subscription on the next update. Recovery every ten seconds also renews the subscription and snapshot; without available storage handlers it uses one second. A controller with `HasAuthority()` already owns storage state and skips network-component acquisition and all subscription requests, including deferred cleanup.
+
+Leaving a base immediately drops its cached totals, even while an old metadata release is deferred. With no pins, there are no player-character/base lookups or storage snapshots; only pending release cleanup can remain. Leaving the in-game HUD or losing the controller also clears the scope. Read-only metadata requests do not craft, transfer items, edit chests, or alter saves.
+
+## Validation
+
+The standalone Lua suite checks duplicate stacks, missing/empty items, one collection shared by multiple materials, 100 unchanged updates without recollection, ten-event burst coalescing, unrelated-base filtering, switching/leaving bases, ten-second recovery, no-pin inactivity, exact old-base subscription cleanup, native menu cancellation recovery, and deferred release. Runtime boundary tests check backpack-plus-storage counts and source labels in the HUD/page, updates after storage events, five-card/paging behavior, and completion removal when leaving a base. Existing personal inventory and seven-pin performance regressions still pass.
+
+The native startup check registered all seven base update hooks plus the metadata request hook and created the UI without a mod error. A temporary read-only probe verified the collection/base/network API signatures and confirmed that `BaseCampOnly` is enum value 1 in the installed game. Cooking the five unchanged widgets completed with zero errors or warnings. The probe log is `build/diagnostics/storage-native-smoke.log`; the temporary installed probe is removed after validation.
+
+After the crash patch, the user confirmed correct chest counts, no crash, and no observed FPS drops in their base. This is qualitative gameplay confirmation, not a measured FPS benchmark. Switching between two bases remains covered by fixtures only: the test save has no second base yet. Remote-client metadata replication and private/locked-chest permissions also remain unverified in gameplay. Automatic tests use fixtures for native results; the startup probe alone did not prove real chest eligibility or replication delivery.
+
+## First-pin crash investigation
+
+The first live storage test crashed immediately after pinning `build:GlobalPalStorage`. The 2026-10-10 crash dump records a read at `0x1cac`, with game RVAs `0x2c87a91` and `0x2a15bb1`. Reading the installed executable's native registration table identifies the caller at `0x2a15af0` as `RequestReplicateBaseCampItemStackInfo_ToServer`. Its implementation calls a controller virtual getter and then reads `[rax + 0x1cac]` without checking the returned pointer. The exception context confirms `Rax=0`. The captured controller vtable's slot at `+0x518` points to RVA `0x5604510`; that getter matches the installed UE 5.1 `APlayerController::GetNetConnection`, returning `Player ? NetConnection : NULL`. This identifies the missing network connection at the fault. A local host does not need this manual subscription because it owns the base state already. A local evidence summary is saved in ignored `build/diagnostics/storage-rpc-crash.txt`.
+
+The patch excludes authoritative controllers from acquiring the network component or issuing metadata requests. Release paths check authority as well. A regression fixture makes that local-host network path throw: it fails before the patch and passes after it, while verifying host counts, switching bases, and clearing pins. The main runtime fixture now uses an authoritative controller and rejects any metadata-component access. All existing remote-client subscription and performance fixtures continue to pass. The user's subsequent in-world test confirmed pinning without a crash and correct chest counts. Remote multiplayer behavior remains unverified.
+
+## Live return check
+
+When a second base becomes available, visit it with different stock: its name and totals should replace the first base's without combining them. Outside either base, only the backpack should count. Additional checks remain for private/locked chests and remote multiplayer replication. Material transfers, native menu closure, clearing/re-pinning, and seven or more pins remain useful regression checks. The user authorized committing and pushing the currently confirmed version before the second-base test.

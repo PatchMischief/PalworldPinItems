@@ -2,9 +2,12 @@ local UEHelpers = require("UEHelpers")
 local Recipes = require("recipes")
 local UI = require("ui")
 local Inventory = require("inventory")
+local Storage = require("storage")
 local tracker = Recipes.new_tracker()
 local inventory_cache = Inventory.new()
 Inventory.subscribe(inventory_cache)
+local storage_cache = Storage.new()
+Storage.subscribe(storage_cache)
 local rendered = {}
 local widget, owner, hovered
 local cards, menu_view
@@ -174,25 +177,27 @@ local function refresh()
     local state = owner:GetPalPlayerState()
     local inventory = valid(state) and state:GetInventoryData() or nil
     Inventory.bind(inventory_cache, inventory, os.clock(), has_pins)
-    local version = tracker.version .. ":" .. inventory_cache.version
+    Storage.bind(storage_cache, owner, os.clock(), has_pins)
+    local version = tracker.version .. ":" .. inventory_cache.version .. ":" .. storage_cache.version
+    local function owned_count(id)
+        local owned = Inventory.count(inventory_cache, id)
+        return owned and (owned + Storage.count(storage_cache, id)) or nil
+    end
     local hover_key = hovered and hovered.key or ""
     if rendered.version ~= version or rendered.hover ~= hover_key then
         UI.visibility(widget, (hovered or has_pins) and 4 or 1) -- SelfHitTestInvisible / Collapsed.
-        UI.text(widget.HoverName, hovered and hovered.name or "")
-        UI.visibility(widget.HoverName, hovered and 0 or 1)
+        UI.text(widget.HoverName, hovered and hovered.name or storage_cache.label)
+        UI.visibility(widget.HoverName, (hovered or has_pins) and 0 or 1)
         UI.visibility(widget.PinButton, hovered and 0 or 1)
         UI.text(widget.PinLabel, Recipes.is_pinned(tracker, hovered) and "Unpin this item  [F8]" or "Pin this item  [F8]")
-        local function owned_count(id)
-            return Inventory.count(inventory_cache, id)
-        end
         local models = Recipes.display(tracker, 1, item_name, owned_count)
         UI.draw(cards, models, owner)
         UI.text(widget.Heading, "Pinned items" .. (#tracker.pins > 5 and ("  (5/" .. #tracker.pins .. "; see Pinned tab)") or ""))
         UI.visibility(widget.ClearButton, has_pins and 0 or 1)
         rendered.version, rendered.hover = version, hover_key
     end
-    UI.update_menu(menu_view, tracker, item_name, function(id) return Inventory.count(inventory_cache, id) end,
-        widgets("WBP_MainMenu_C"), version)
+    UI.update_menu(menu_view, tracker, item_name, owned_count,
+        widgets("WBP_MainMenu_C"), version, storage_cache.label)
     if not menu_hooks_ready then
         local native = "/Game/Pal/Blueprint/UI/UserInterface/MainMenu/WBP_MainMenu.WBP_MainMenu_C:SelectByMainMenuType"
         if valid(StaticFindObject(native)) then
@@ -261,6 +266,7 @@ local function update()
     local viewport = UEHelpers.GetGameViewportClient()
     local controller = valid(viewport) and gameplay:GetPlayerController(viewport, 0) or nil
     if not valid(controller) then
+        Storage.bind(storage_cache, nil, os.clock(), false)
         if valid(widget) then widget:RemoveFromParent() end
         if menu_view and valid(menu_view.widget) then menu_view.widget:RemoveFromParent() end
         if menu_view and valid(menu_view.tab) then menu_view.tab:RemoveFromParent() end
@@ -279,12 +285,14 @@ local function update()
     -- Load and validate the collapsed widget before entering a save.
     ensure_widget(controller)
     if not valid(controller:GetHUD()) then
+        Storage.bind(storage_cache, nil, os.clock(), false)
         UI.visibility(widget, 1); UI.visibility(menu_view.widget, 1); menu_view.open = false
         hovered = nil; rendered = {}; return
     end
     -- Only show on the local in-game HUD; no visible UI on the title screen.
     local hud_name = controller:GetHUD():GetFullName()
     if not hud_name:find("PalHUD_InGame", 1, true) and not hud_name:find("PalHUDInGame", 1, true) then
+        Storage.bind(storage_cache, nil, os.clock(), false)
         UI.visibility(widget, 1)
         UI.visibility(menu_view.widget, 1)
         menu_view.open = false

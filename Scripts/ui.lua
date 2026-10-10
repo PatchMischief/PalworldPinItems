@@ -137,7 +137,7 @@ function UI.menu(controller)
     return view
 end
 
-function UI.update_menu(view, tracker, item_name, owned_count, menus, version)
+function UI.update_menu(view, tracker, item_name, owned_count, menus, version, scope)
     local menu
     for _, candidate in ipairs(menus) do
         if valid(candidate) and candidate:IsVisible() then menu = candidate; break end
@@ -158,6 +158,7 @@ function UI.update_menu(view, tracker, item_name, owned_count, menus, version)
         local models, page, pages = Recipes.display(tracker, view.page, item_name, owned_count)
         view.page = page
         UI.draw(view.cards, models, view.controller)
+        UI.text(view.widget.PageHeading, "Pinned items · " .. scope)
         UI.text(view.widget.PageLabel, page .. " / " .. pages)
         enabled(view.widget.PreviousButton, page > 1)
         enabled(view.widget.NextButton, page < pages)
