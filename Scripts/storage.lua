@@ -58,7 +58,8 @@ function Storage.bind(cache, controller, now, has_pins)
             end
             local name = base:GetBaseCampName()
             if type(name) ~= "string" then name = name:ToString() end
-            cache.label = "Backpack + " .. (name ~= "" and name or "current base")
+            local number = name:match("[0-9]+")
+            cache.label = "Backpack + " .. (number and ("Base " .. number) or "current base")
             cache.deadline = now + cache.interval
             request(cache, true)
         end

@@ -190,7 +190,7 @@ local function refresh()
         UI.text(widget.HoverName, hovered and hovered.name or storage_cache.label)
         UI.visibility(widget.HoverName, (hovered or has_pins) and 0 or 1)
         UI.visibility(widget.PinButton, hovered and 0 or 1)
-        UI.text(widget.PinLabel, Recipes.is_pinned(tracker, hovered) and "Unpin this item  [F8]" or "Pin this item  [F8]")
+        UI.text(widget.PinLabel, Recipes.is_pinned(tracker, hovered) and "Unpin this item  [G]" or "Pin this item  [G]")
         local models = Recipes.display(tracker, 1, item_name, owned_count)
         UI.draw(cards, models, owner)
         UI.visibility(widget.ClearButton, has_pins and 0 or 1)
@@ -328,8 +328,8 @@ local function update()
     refresh()
 end
 
-RegisterKeyBind(Key.F8, function() ExecuteInGameThread(pin) end)
-RegisterKeyBind(Key.F8, {ModifierKey.SHIFT}, function() ExecuteInGameThread(clear) end)
+RegisterKeyBind(Key.G, function() ExecuteInGameThread(pin) end)
+RegisterKeyBind(Key.G, {ModifierKey.SHIFT}, function() ExecuteInGameThread(clear) end)
 -- UE4SS async Lua shares its state with hooks; keep the recurring work on the game thread.
 LoopInGameThreadWithDelay(150, function()
     local ok, message = xpcall(update, debug.traceback)
@@ -338,4 +338,4 @@ LoopInGameThreadWithDelay(150, function()
         last_error = message
     elseif ok then last_error = nil end
 end)
-print("[PalworldPinItems] Loaded; hover a craft/build recipe and use Pin this item or F8.")
+print("[PalworldPinItems] Loaded; hover a craft/build recipe and use Pin this item or G.")

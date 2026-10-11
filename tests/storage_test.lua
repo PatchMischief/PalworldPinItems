@@ -9,7 +9,7 @@ local function row(item, count) return {StaticItemId = name(item), Num = count} 
 local function camp(value, label)
     return object({GetId = function() return id(value) end, GetBaseCampName = function() return label end})
 end
-local base_a, base_b = camp(1, "Forest"), camp(2, "Desert")
+local base_a, base_b = camp(1, name("新規生成拠点テンプレート名5(仮)")), camp(2, "Camp 2")
 local active, snapshots, player_lookups = nil, 0, 0
 local requests, hooks = {}, {}
 local rows = {[base_a] = {row("Wood", 7), row("Wood", 3), row("Stone", 4), row("None", 99), row("Empty", 0)},
@@ -51,7 +51,7 @@ local host = object({GetAddress = function() return 101 end, HasAuthority = func
     Transmitter = object({GetBaseCamp = function() error("Host metadata RPC path would crash natively") end})})
 local host_cache = Storage.new()
 Storage.bind(host_cache, host, 0, true)
-assert(host_cache.label == "Backpack + Forest" and #requests == 0)
+assert(host_cache.label == "Backpack + Base 5" and #requests == 0)
 collector.CollectLocalPlayerControllableAllItemInfos = function(_, context, output, collect_type)
     assert((context == controller or context == host) and collect_type == 1)
     snapshots = snapshots + 1
@@ -71,7 +71,7 @@ Storage.bind(cache, controller, 0, true)
 assert(cache.label == "Backpack" and Storage.count(cache, "Wood") == 0 and #requests == 0)
 active = base_a
 Storage.bind(cache, controller, 0, true)
-assert(cache.label == "Backpack + Forest")
+assert(cache.label == "Backpack + Base 5")
 assert(Storage.count(cache, "Wood") == 10 and Storage.count(cache, "Stone") == 4)
 assert(Storage.count(cache, "Missing") == 0 and Storage.count(cache, "None") == 0 and snapshots == 1)
 assert(#requests == 1 and requests[1].base == 1 and requests[1].enabled)
@@ -93,7 +93,7 @@ assert(Storage.count(cache, "Wood") == 12 and snapshots == 3, "Coalesce base upd
 active = base_b
 Storage.bind(cache, controller, 1, true)
 assert(Storage.count(cache, "Wood") == 50 and Storage.count(cache, "Stone") == 0)
-assert(cache.label == "Backpack + Desert")
+assert(cache.label == "Backpack + Base 2")
 assert(requests[#requests - 1].base == 1 and not requests[#requests - 1].enabled and requests[#requests].base == 2 and requests[#requests].enabled)
 updated(1)
 Storage.bind(cache, controller, 1.1, true); Storage.count(cache, "Wood")
@@ -121,4 +121,11 @@ request_count = #requests
 controller.IsValid = function() return false end
 Storage.bind(cache, nil, 22, false)
 assert(#requests == request_count and Storage.count(cache, "Wood") == 0, "World teardown must drop totals without calling a destroyed owner's RPC")
+controller.IsValid = function() return true end
+active = camp(3, "Forest")
+Storage.bind(cache, controller, 23, true)
+assert(cache.label == "Backpack + current base" and cache.key == "3:2:3:4", "A name without digits must not invent a number or change GUID identity")
+active = camp(4, "")
+Storage.bind(cache, controller, 24, true)
+assert(cache.label == "Backpack + current base", "An empty name needs a safe UI fallback")
 print("Base storage tests passed: duplicate stacks, hash counts, current-base isolation, event bursts, switching/leaving, idle, reconciliation.")

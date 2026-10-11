@@ -74,8 +74,8 @@ local pc = object({GetHUD = function() return hud end, GetAddress = function() r
 local active_base, storage_reads = nil, 0
 local base_wood = 7
 local function base_id(value) return {A = value, B = 0, C = 0, D = 0} end
-local base_a = object({GetId = function() return base_id(1) end, GetBaseCampName = function() return "Forest" end})
-local base_b = object({GetId = function() return base_id(2) end, GetBaseCampName = function() return "Desert" end})
+local base_a = object({GetId = function() return base_id(1) end, GetBaseCampName = function() return "Template 5" end})
+local base_b = object({GetId = function() return base_id(2) end, GetBaseCampName = function() return "Camp 2" end})
 local player = object({InsideBaseCampCheckComponent = object({IsInsideBaseCamp = function() return active_base ~= nil end,
     GetInsideBaseCampModel = function() return active_base end})})
 pc.Transmitter = object({GetBaseCamp = function() error("Standalone player must not enter metadata RPC path") end})
@@ -165,7 +165,10 @@ function RegisterHook(path, callback, post) hooks[path] = post or callback; retu
 local function inventory_event(target, method, helper)
     hooks["/Script/Pal." .. (helper and "PalItemContainerMultiHelper" or "PalPlayerInventoryData") .. ":" .. method]({get = function() return target end})
 end
-function RegisterKeyBind(key, modifiers, callback) binds[#binds + 1] = callback or modifiers end
+function RegisterKeyBind(key, modifiers, callback)
+    assert(key == Key.G and (#binds == 0 or modifiers[1] == ModifierKey.SHIFT), "Use G to pin and Shift+G to clear")
+    binds[#binds + 1] = callback or modifiers
+end
 function LoopAsync() error("Periodic refresh must not run on UE4SS's shared async Lua state") end
 local loop_registrations = 0
 function LoopInGameThreadWithDelay(delay, callback)
@@ -174,7 +177,7 @@ function LoopInGameThreadWithDelay(delay, callback)
     tick = callback
 end
 function ExecuteInGameThread(callback) callback() end
-Key, ModifierKey = {F8 = 119}, {SHIFT = 16}
+Key, ModifierKey = {G = 71}, {SHIFT = 16}
 package.preload.UEHelpers = function() return {GetPlayerController = function() FindAllOf("PlayerController"); return pc end,
     GetGameViewportClient = function() return viewport end} end
 created("WBP_InventoryEquipment_ItemInfo_C", tooltip) -- Existing UI must be found by the one-time bootstrap.
@@ -195,7 +198,8 @@ assert(unsafe_name_calls == 0, "Failed lookups reached the native FText crash pa
 tooltip.CachedDisplayInfo.RecipeID = FName("Arrow")
 tick()
 local class = "/Game/Mods/PalworldPinItems/WBP_PinItems.WBP_PinItems_C"
-hooks[class .. ":PinHovered"]()
+binds[1]()
+assert(ui.PinLabel.text == "Unpin this item  [G]", "G must toggle the hovered recipe and update the shortcut hint")
 assert(pinned_text():find("Arrow x3\n  Wood: 20/2", 1, true))
 assert(ui.PinnedList.children[1].ItemIcon.texture == "icon:Arrow", "Crafted item icon missing")
 assert(ui.PinnedList.children[1].Materials.children[1].MaterialIcon.texture == "icon:Wood", "Material icon missing")
@@ -209,7 +213,7 @@ owned.Wood = 9
 inventory_event(inventory, "OnUpdateInventoryContainer")
 tick()
 assert(pinned_text():find("Wood: 9/2", 1, true), "Inventory changes must update retained pins")
-hooks[class .. ":ClearPins"]()
+binds[2]()
 assert(pinned_text() == "" and ui.visibility == 1)
 hud.HoverWidget = tooltip
 tooltip.IsVisible = function() return true end
@@ -282,6 +286,9 @@ assert(scans == 0 and ui_writes == 0, "Steady pinned/menu UI must not scan globa
 UI.draw = native_draw
 viewport_height = 1080
 tick()
+assert(visible_cards(ui.PinnedList) == 5 and ui.Panel:GetDesiredSize().Y <= UI.hud_height(pc), "The top-left band must fit five ordinary cards at 1080p")
+viewport_height = 400
+tick()
 assert(visible_cards(ui.PinnedList) < 5 and visible_cards(ui.PinnedList) > 0, "Small HUD gaps must keep whole cards, with overflow on the Pinned page")
 assert(ui.Panel:GetDesiredSize().Y <= UI.hud_height(pc))
 local prepass_count = prepasses
@@ -307,7 +314,7 @@ assert(count_reads == 0, "Reconciliation must not resume per-update polling")
 hud.IsAnyOverlayUIActive = function() return false end
 active_base = base_a
 tick()
-assert(pinned_text():find("Wood: 8/2", 1, true) and ui.HoverName.text == "Backpack + Forest")
+assert(pinned_text():find("Wood: 8/2", 1, true) and ui.HoverName.text == "Backpack + Base 5")
 assert(storage_reads == 1, "Every visible card must share one base snapshot")
 for _ = 1, 100 do tick() end
 assert(storage_reads == 1, "Pinned recipes must not repeatedly scan base storage")
@@ -321,10 +328,10 @@ base_wood = 9
 base_event(1); tick()
 assert(pinned_text():find("Wood: 10/2", 1, true) and storage_reads == 2)
 hooks["/Game/Mods/PalworldPinItems/WBP_PinTab.WBP_PinTab_C:OpenPinned"]()
-assert(page_view.PageHeading.text == "Pinned items · Backpack + Forest")
+assert(page_view.PageHeading.text == "Pinned items · Backpack + Base 5")
 active_base = base_b
 tick()
-assert(pinned_text():find("Wood: 51/2", 1, true) and ui.HoverName.text == "Backpack + Desert")
+assert(pinned_text():find("Wood: 51/2", 1, true) and ui.HoverName.text == "Backpack + Base 2")
 active_base = nil
 tick()
 assert(pinned_text():find("Wood: 1/2", 1, true) and ui.HoverName.text == "Backpack")

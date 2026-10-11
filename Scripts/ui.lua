@@ -131,7 +131,7 @@ end
 
 function UI.hud_height(controller)
     local layout = StaticFindObject("/Script/UMG.Default__WidgetLayoutLibrary")
-    return math.max(0, layout:GetViewportSize(controller).Y / layout:GetViewportScale(controller) * 0.27 - 16)
+    return math.max(0, layout:GetViewportSize(controller).Y / layout:GetViewportScale(controller) * 0.73 - 48)
 end
 
 function UI.fit_hud(widget, cards, count, height)
